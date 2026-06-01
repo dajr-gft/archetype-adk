@@ -1,0 +1,8 @@
+[project]
+name = "adk-agent-archetype"
+version = "0.1.0"
+description = "Wynxx modernization archetype: a legacy domain modeled as a Google ADK 2.0 agent"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk>=2.0.0",
+]
