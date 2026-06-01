@@ -1,8 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "adk-agent-archetype"
 version = "0.1.0"
-description = "Wynxx modernization archetype: a legacy domain modeled as a Google ADK 2.0 agent"
+description = "Wynxx modernization archetype: a legacy domain modeled as a Google ADK 2.1 agent"
 requires-python = ">=3.10"
 dependencies = [
-    "google-adk>=2.0.0",
+    "google-adk>=2.1.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["domain_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# Operationalize the archetype's own anti-patterns:
+#   T20 -> flags `print()` (forbidden in tools); S -> bandit (e.g. flags `os.system`,
+#   insecure calls); the rest cover style, imports, naming, and modern-Python upgrades.
+select = ["E", "W", "F", "I", "UP", "N", "S", "T20"]
+
+[tool.ruff.lint.per-file-ignores]
+# `from . import agent` is the required ADK discovery import (side-effect), not dead code.
+"domain_agent/__init__.py" = ["F401"]
+# Tests may use assert (S101).
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false

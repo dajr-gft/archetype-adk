@@ -1,9 +1,11 @@
 """Domain operations exposed as ADK function tools.
 
 ADK builds each tool's schema from the function name, type hints and docstring,
-so keep all three accurate. Conventions (per the ADK 2.0 docs):
+so keep all three accurate. Conventions (per the ADK 2.1 docs):
 - Type-hint every parameter; omit defaults for values the model must supply.
 - Return a ``dict`` with a ``status`` key ("success" | "error").
+- Validate inputs and coerce numeric strings *inside the tool* — never raise; the
+  tool is where the types and verbatim string codes are known (see archetype.md).
 - In a generated agent, each legacy use-case / public service method becomes one
   typed function here, wired to the modernized domain logic.
 """

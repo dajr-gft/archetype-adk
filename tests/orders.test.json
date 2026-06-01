@@ -1,0 +1,67 @@
+{
+  "eval_set_id": "orders_domain_agent_smoke",
+  "name": "orders domain agent — golden trajectory",
+  "description": "Regression gate for the illustrative `orders` domain. The point of interest is the tool-call trajectory: tool_trajectory_avg_score=1.0 (see test_config.json) makes a wrong or reordered tool call fail the build. Generated agents replace these cases with domain-specific golden trajectories (e.g. validate -> risk -> pricing -> decision for a credit pipeline).",
+  "eval_cases": [
+    {
+      "eval_id": "list_capabilities",
+      "conversation": [
+        {
+          "invocation_id": "orders-eval-0001",
+          "user_content": {
+            "parts": [{ "text": "What can you do?" }],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              { "text": "I can create an order, get an order, and cancel an order." }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [{ "name": "list_capabilities", "args": {} }],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "domain_agent",
+        "user_id": "test_user",
+        "state": {}
+      }
+    },
+    {
+      "eval_id": "execute_create_order",
+      "conversation": [
+        {
+          "invocation_id": "orders-eval-0002",
+          "user_content": {
+            "parts": [{ "text": "Create an order for SKU-100, quantity 2." }],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [{ "text": "The create_order operation completed successfully." }],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "execute_operation",
+                "args": {
+                  "operation": "create_order",
+                  "payload": { "sku": "SKU-100", "quantity": 2 }
+                }
+              }
+            ],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "domain_agent",
+        "user_id": "test_user",
+        "state": {}
+      }
+    }
+  ]
+}
