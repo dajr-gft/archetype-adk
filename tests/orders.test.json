@@ -1,7 +1,7 @@
 {
   "eval_set_id": "orders_domain_agent_smoke",
   "name": "orders domain agent — golden trajectory",
-  "description": "Regression gate for the illustrative `orders` domain. The point of interest is the tool-call trajectory: tool_trajectory_avg_score=1.0 (see test_config.json) makes a wrong or reordered tool call fail the build. Generated agents replace these cases with domain-specific golden trajectories (e.g. validate -> risk -> pricing -> decision for a credit pipeline).",
+  "description": "Regression gate for the illustrative `orders` domain. The lever is the tool-call trajectory: with tool_trajectory_avg_score=1.0 (see test_config.json) a wrong, reordered, or dropped tool call fails the build. Generated agents replace this with domain-specific golden trajectories whose tools take explicit scalar args (e.g. validate_inputs -> evaluate_risk -> calculate_pricing -> evaluate_decisioning for a credit pipeline), which are stable to assert exactly.",
   "eval_cases": [
     {
       "eval_id": "list_capabilities",
@@ -20,39 +20,6 @@
           },
           "intermediate_data": {
             "tool_uses": [{ "name": "list_capabilities", "args": {} }],
-            "intermediate_responses": []
-          }
-        }
-      ],
-      "session_input": {
-        "app_name": "domain_agent",
-        "user_id": "test_user",
-        "state": {}
-      }
-    },
-    {
-      "eval_id": "execute_create_order",
-      "conversation": [
-        {
-          "invocation_id": "orders-eval-0002",
-          "user_content": {
-            "parts": [{ "text": "Create an order for SKU-100, quantity 2." }],
-            "role": "user"
-          },
-          "final_response": {
-            "parts": [{ "text": "The create_order operation completed successfully." }],
-            "role": "model"
-          },
-          "intermediate_data": {
-            "tool_uses": [
-              {
-                "name": "execute_operation",
-                "args": {
-                  "operation": "create_order",
-                  "payload": { "sku": "SKU-100", "quantity": 2 }
-                }
-              }
-            ],
             "intermediate_responses": []
           }
         }

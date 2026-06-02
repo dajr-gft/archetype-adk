@@ -22,3 +22,10 @@ env/
 .ruff_cache/
 .idea/
 .vscode/
+
+# ADK eval history / local run artifacts
+.adk/
+**/.adk/
+
+# Local scratch
+_smoke.py

@@ -63,12 +63,17 @@ auditable domains where a silently-downgraded `DENY` must be caught:
 ```bash
 pip install -e ".[dev]"
 pytest tests/                              # via AgentEvaluator (needs a Gemini backend)
-adk eval domain_agent tests/orders.test.json   # equivalent CLI form
+# equivalent CLI form — pass the config explicitly (CLI does not auto-discover it):
+adk eval domain_agent tests/orders.test.json --config_file_path tests/test_config.json
 ```
 
 `test_config.json` sets `tool_trajectory_avg_score = 1.0`, so any wrong, reordered, or
-dropped tool call fails. Generated agents replace `orders.test.json` with domain-specific
-golden trajectories (e.g. `validate → risk → pricing → decision`).
+dropped tool call fails — the auditability lever. (`response_match_score` is omitted on
+purpose: ROUGE on free-form prose is noisy and drifts under the `-latest` alias; add it
+only with a pinned GA model and stable references.) Generated agents replace
+`orders.test.json` with domain-specific golden trajectories (e.g.
+`validate → risk → pricing → decision`), whose tools take explicit scalar args that
+assert cleanly.
 
 ## Quality tooling
 

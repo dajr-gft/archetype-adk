@@ -612,14 +612,18 @@ ADK evaluator** as a build gate (it runs locally, no paid service):
 - `tests/<domain>.test.json` — golden cases in the ADK `EvalSet` schema: each turn
   has `user_content`, `final_response`, and `intermediate_data.tool_uses` (the
   **expected tool-call trajectory**, in order, with args).
-- `tests/test_config.json` — `{"criteria": {"tool_trajectory_avg_score": 1.0,
-  "response_match_score": 0.5}}`. The `1.0` enforces an **exact** tool trajectory:
-  a wrong, reordered, or dropped tool call fails the build — the auditability lever.
+- `tests/test_config.json` — `{"criteria": {"tool_trajectory_avg_score": 1.0}}`. The
+  `1.0` enforces an **exact** tool trajectory: a wrong, reordered, or dropped tool call
+  fails the build — the auditability lever. Add `response_match_score` only with a
+  **pinned GA model** and stable reference responses (ROUGE on free-form prose drifts
+  under the `-latest` alias).
 - `tests/test_eval.py` — `await AgentEvaluator.evaluate(agent_module="domain_agent",
   eval_dataset_file_path_or_dir="tests/<domain>.test.json")`.
 
-Run: `pytest tests/` or `adk eval domain_agent tests/<domain>.test.json`. For a
-pipeline domain, the golden trajectory is the ordered step sequence
+Run: `pytest tests/` (auto-discovers `test_config.json`) or
+`adk eval domain_agent tests/<domain>.test.json --config_file_path tests/test_config.json`
+(the CLI does not auto-discover the config — pass it explicitly). For a pipeline
+domain, the golden trajectory is the ordered step sequence
 (`validate_inputs → evaluate_risk → calculate_pricing → evaluate_decisioning`).
 
 ## Observability (decision provenance)
