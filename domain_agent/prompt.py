@@ -4,6 +4,10 @@ not scattered across the tools.
 
 At runtime ADK substitutes ``{state_key}`` templates from session state, so a
 generated agent can inject context (e.g. ``{customer_id}``) without code changes.
+
+Only an upstream sub-agent ``output_key`` may appear as a single-brace ``{key}``. Every
+other literal brace — JSON examples, output samples, field names like ``{serasaScore}`` —
+MUST be doubled (``{{serasaScore}}``) or ADK raises ``KeyError`` and the agent crashes.
 """
 
 DOMAIN_INSTRUCTION = """\

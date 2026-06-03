@@ -183,7 +183,11 @@ decoding the model allows, plus `HttpRetryOptions` for transient-429 resilience.
   the `global` endpoint (set in `.env`); on a regional endpoint use a versioned ID.
 - **Auditable/compliance domains:** prefer a **pinned GA version** over `-latest`.
   Reproducibility (a fixed model → fixed behavior, regression-diffable) beats
-  auto-currency, which can silently drift a credit decision.
+  auto-currency, which can silently drift a credit decision. **But pin only a dated GA
+  release you have verified exists in the target Vertex project** — pinning a retired or
+  not-yet-enabled version (e.g. `gemini-2.0-flash-001`) raises a runtime
+  `404 NOT_FOUND. Publisher Model ... not found`. When unsure, keep the
+  `gemini-flash-latest` alias (the safe default) rather than guessing a dated string.
 - **Never default to a `-preview` model** — preview models carry availability and
   quota limitations unsuitable for production.
 - **Reasoning-heavy domains:** add a `planner` (next section) *before* escalating
@@ -538,6 +542,16 @@ File: `domain_agent/prompt.py`. For `SequentialAgent` pipelines, define **one
 instruction per sub-agent step**. For `LlmAgent` dispatchers, define a single
 `DOMAIN_INSTRUCTION` covering all capabilities.
 
+> **⚠️ Curly braces are ADK templates — escape every literal one (critical, runtime-fatal).**
+> At runtime ADK replaces every `{name}` in an instruction with `session.state["name"]`. The
+> **only** single-brace `{name}` allowed is an upstream **`output_key`** (a real state key,
+> e.g. `{rule_hits}`). **Every other literal brace MUST be doubled** — JSON examples, output
+> samples, and field names such as `{serasaScore}`, `{highRelevanceCount}`, or
+> `{companyName}` must be written `{{serasaScore}}`, `{{highRelevanceCount}}`,
+> `{{companyName}}`. An unescaped non-state `{name}` raises
+> `KeyError: Context variable not found: 'name'` and the agent **crashes on its first turn**.
+> Rule of thumb: in any instruction, double **every** brace that is not an upstream output_key.
+
 **Pipeline step instructions** must state:
 1. **Single responsibility** — "You are the risk evaluation step. Call `evaluate_risk` once and return."
 2. **Inputs from session state** — reference prior `output_key` values via `{key}` templates.
@@ -609,9 +623,13 @@ A modernized credit/approval domain is only trustworthy if a regression suite
 catches a silently-downgraded `DENY` or a reordered pipeline. Ship the **native
 ADK evaluator** as a build gate (it runs locally, no paid service):
 
-- `tests/<domain>.test.json` — golden cases in the ADK `EvalSet` schema: each turn
-  has `user_content`, `final_response`, and `intermediate_data.tool_uses` (the
-  **expected tool-call trajectory**, in order, with args).
+- `tests/<domain>.test.json` — golden cases in the **current ADK `EvalSet` schema**,
+  EXACTLY like `tests/orders.test.json`: top-level `eval_set_id` → `eval_cases[]` → each
+  case a `conversation[]` whose turns have `user_content`, `final_response`, and
+  `intermediate_data.tool_uses` (the **expected tool-call trajectory**, in order, with args),
+  plus `session_input`. **Never emit the legacy format** (`turns` / `expected_tool_uses` /
+  `initial_session`) — the ADK 2.1 `AgentEvaluator` rejects it with
+  *"Samples ... must include 'query' and 'expected_tool_use' keys"* and the eval gate fails.
 - `tests/test_config.json` — `{"criteria": {"tool_trajectory_avg_score": 1.0}}`. The
   `1.0` enforces an **exact** tool trajectory: a wrong, reordered, or dropped tool call
   fails the build — the auditability lever. Add `response_match_score` only with a
@@ -661,3 +679,6 @@ traces with a domain-level record of every tool call and its outcome.
 | `output_schema` on a tool-calling agent (unreliable) | `output_schema` only on a terminal, tool-less step; compute with a deterministic tool |
 | Centralizing numeric coercion in a callback | Coerce inside each tool — a generic callback would corrupt string codes (e.g. CNAE `"24"`) |
 | Shipping a domain agent with no eval set | Add `tests/<domain>.test.json` + `test_config.json` with `tool_trajectory_avg_score=1.0` |
+| Unescaped literal `{serasaScore}` / `{companyName}` in an instruction (ADK reads it as state → `KeyError`) | Double every non-state brace: `{{serasaScore}}`; only upstream `output_key`s stay single-brace |
+| Pinning a retired/unverified model (`gemini-2.0-flash-001` → runtime 404) | Use `gemini-flash-latest`, or pin only a GA version verified to exist in the target project |
+| Legacy eval format (`turns` / `expected_tool_uses` / `initial_session`) | Use the current `EvalSet` schema exactly like `tests/orders.test.json` |
