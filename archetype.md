@@ -509,20 +509,32 @@ automatically; the sub-agent instruction should reference `{rule_hits}` (the
 output_key of the upstream step) using ADK's template interpolation:
 
 ```python
+# The intake/validate step returns the FULL request, so {validation_result} carries every
+# field; each later step reads the raw inputs it needs from it — not just the previous step's
+# output. (amount_brl is a RAW request field, so it comes from {validation_result}.)
 DECISION_INSTRUCTION = """\
 You are the decision assembly step.
 
-Risk evaluation result: {rule_hits}
-Pricing result: {pricing_result}
+Validated request: {validation_result}   # full request — read amount_brl from here
+Risk evaluation:   {rule_hits}
+Pricing result:    {pricing_result}
 
-Call evaluate_decisioning(rule_hits, suggested_spread_pct, amount_brl) using
-the values above. Return the final credit decision.
+Call evaluate_decisioning with rule_hits, suggested_spread_pct (from {pricing_result}), and
+amount_brl (from {validation_result}). Return the final credit decision.
 """
 ```
 
-This eliminates the LLM threading problem: the LLM in the decision step sees the
-actual `rule_hits` output from the risk step injected into its instruction —
-it cannot lose, hallucinate, or reorder it.
+This eliminates the LLM threading problem: each step sees the upstream outputs injected into
+its instruction — it cannot lose, reorder, or hallucinate them.
+
+> **⚠️ A downstream step sees ONLY the upstream `output_key`s injected into state — NEVER the
+> original user request.** So **the FIRST step must capture and echo EVERY field the later
+> steps need**, and each step threads forward what downstream steps require. If the validate
+> step returns only a few of the request's fields, the risk/pricing/decision steps won't have
+> `serasa_score`, `revenue_12m_brl`, `amount_brl`, etc. — and the LLM will then **hallucinate
+> "a healthy profile" or stall asking the user for values**. Make the intake/validate tool
+> return the **full validated request**, and reference its `output_key` (e.g.
+> `{validation_result}`) in every later step that needs a raw input.
 
 #### 10. Return shape (all tools)
 
@@ -682,3 +694,4 @@ traces with a domain-level record of every tool call and its outcome.
 | Unescaped literal `{serasaScore}` / `{companyName}` in an instruction (ADK reads it as state → `KeyError`) | Double every non-state brace: `{{serasaScore}}`; only upstream `output_key`s stay single-brace |
 | Pinning a retired/unverified model (`gemini-2.0-flash-001` → runtime 404) | Use `gemini-flash-latest`, or pin only a GA version verified to exist in the target project |
 | Legacy eval format (`turns` / `expected_tool_uses` / `initial_session`) | Use the current `EvalSet` schema exactly like `tests/orders.test.json` |
+| First pipeline step captures only some request fields → later steps hallucinate a "healthy profile" or stall asking the user | Intake/validate tool returns the **full** validated request; later steps read raw inputs from its `output_key` (e.g. `{validation_result}`) |
