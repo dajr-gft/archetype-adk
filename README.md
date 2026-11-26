@@ -15,8 +15,8 @@ look something up, change it after a confirmation, and have a second person appr
 | Decision | What it means in the code |
 |---|---|
 | The model talks, code decides | Rules are plain Python in `domain_agent/domain/`, unit-tested without a model |
-| Who acts comes from the session | The user is `tool_context.user_id`; no tool has a parameter for it |
-| Nothing is written that the user did not see | A write is prepared, shown, then submitted from a draft in the session, in a later turn |
+| Who acts comes from the session | The toolkit gives the session user to the use case; no tool has a parameter for it |
+| A write is the one the user was shown, answered and made once | Preview, then exactly one message of the user, then the write; refused if what was shown changed; recorded with its confirmation key |
 | Every rule says where it comes from | Legacy code, a document, or a declared assumption in `OPEN_POINTS.md` |
 
 ## Layout
@@ -24,32 +24,37 @@ look something up, change it after a confirmation, and have a second person appr
 ```
 archetype.md               the contract for the generator (patterns, rules, gates)
 OPEN_POINTS.md             what the legacy sources do not state
+ARCHETYPE_OWNED.sha256     the files a generated agent must not change
 domain_agent/              the agent package (its name is the ADK app name)
   agent.py                 root_agent and app (model, generation config, plugins)
   prompt.py                the instruction: behaviour, no business values
-  tools.py                 thin tools: session identity, draft and review guards
-  plugins.py               audit plugin (one record per tool call)
+  tools.py                 one thin tool per thing the user can ask for
+  toolkit.py               (archetype) envelope, acting user, confirmation of writes
+  plugins.py               (archetype) audit log, one JSON line per tool call
+  wiring.py                which store the agent is connected to
   domain/
+    base.py                (archetype) shared types; what makes a write safe
     rules.py               constants, validations, the rule catalogue with sources
     service.py             one use case per legacy operation
     store.py               records, storage port, in-memory implementation
 examples/pipeline_agent/   the pipeline pattern: a graph workflow with code steps
 tools/
-  conformance.py           gate: the rules of archetype.md a machine can check (C01-C09)
+  conformance.py           gate: the rules of archetype.md a machine can check (C00-C13)
   check_model.py           preflight: does the configured model answer here?
-  check_deploy.py          preflight: faults that only show after deployment (D01-D06)
+  check_deploy.py          preflight: faults that only show after deployment (D01-D08)
 tests/
-  unit/                    rules and tool guards, no model
+  unit/                    rules, flows, toolkit, store contract, golden set replayed: no model
   eval/                    golden conversations against the real model
   archetype/               self-tests of the archetype (gates, pipeline example)
+  support/                 a scripted model that drives the real tools in tests
 ```
 
 ## Run it
 
 ```bash
-python -m venv .venv && . .venv/bin/activate        # Python 3.11 or later
-pip install -e ".[dev]"
-cp .env.example .env                                 # project, location, optional model
+uv sync --extra dev                                  # the locked versions (Python 3.11 or later)
+# or: python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
+cp .env.example .env                                 # then set the project and the location
 
 python tools/check_model.py                          # the model answers in this project and region
 adk run domain_agent                                 # talk to the agent in the terminal
@@ -58,19 +63,24 @@ adk run examples/pipeline_agent                      # the pipeline example
 ```
 
 In the developer UI the user id of the session is the acting user: use two user ids to
-play the requester and the approver.
+play the requester and the approver. The in-memory store starts with two pending requests
+of a third user, so an approver has something to decide.
 
 ## Gates
 
 ```bash
 ruff check . && ruff format --check . && mypy        # static
-python tools/conformance.py                          # conformance, C01-C09
-pytest -m "not model"                                # unit tests and self-tests, no model
+python tools/conformance.py                          # conformance, C00-C13
+pytest -m "not model"                                # everything that needs no model
 pytest -m model                                      # evaluation, calls the model
 ```
 
-The first three need no credentials and run in seconds. The evaluation asks for an exact
-tool trajectory: a wrong, missing, extra or reordered tool call fails.
+The first three need no credentials. The evaluation asks for an exact tool trajectory: a
+wrong, missing, extra or reordered tool call fails. It fails, not skips, when no backend
+is configured (`EVAL_GATE=off` skips it on purpose).
+
+For the archetype itself, also `mypy examples` and, after changing a file of the
+archetype, `python tools/conformance.py --write-owned`.
 
 ## Deploy
 
@@ -80,35 +90,37 @@ python tools/check_deploy.py                         # fix what it reports
 agents-cli deploy
 ```
 
-`check_deploy.py` checks six faults that pass every local test and fail on the first call
-of the deployed agent (for example a missing server dependency, or the missing routes
-that Gemini Enterprise calls). Before deploying, replace the in-memory store with an
-implementation on the system of record, and decide who may do what from the user id the
-platform passes. See section 10 of `archetype.md`.
+`check_deploy.py` checks eight faults that pass every local test and fail after
+deployment (a missing server dependency, the routes that Gemini Enterprise calls, an
+in-memory store, ...). Before deploying, connect the system of record in
+`domain_agent/wiring.py` and read section 10 of `archetype.md`: the guarantees of the
+agent assume that the platform, not the caller, sets the user of the session.
 
-## What changed in 2.0
+## What changed
 
-Version 1 targeted ADK 2.1 and legacy Java. Version 2 is a redesign:
+**2.1** (after an independent review of 2.0)
 
-- **ADK 2.15** (Python 3.11+): `App` with plugins, the graph `Workflow`, session identity
-  on the tool context. The `global_instruction` field is deprecated in ADK and no longer
-  used.
-- **Rules moved out of the instruction** into a domain package with no ADK dependency,
-  with a rule catalogue that cites its sources. Version 1 put the rules in the prompt and
-  repeated their values in the tools.
-- **The pipeline pattern is a graph workflow with code steps**, not a chain of model
-  agents that each call one tool: two model calls instead of one per step, and the order
-  cannot be skipped or changed by a model.
-- **Write and approval guards in code**: draft before submit, never in the same turn;
-  review before a decision; identity from the session. Tools are coroutines, so a slow
-  system of record does not stall the other conversations.
-- **A conformance gate** turns the prose rules into checks. Each one is a defect that
-  code generation produced before (a tool imported but not defined, unescaped braces in
-  an instruction, an unavailable model name, the old evaluation format, ...).
-- **The model is configuration.** The previous default, the alias `gemini-flash-latest`,
-  no longer resolves. The default is now a dated version, overridable with `AGENT_MODEL`,
-  and `tools/check_model.py` verifies it per project and region.
-- **Any legacy source.** The mapping covers mainframe screens and programs as well as
-  services.
-- **Money is exact** (integer minor units or `Decimal`), never `float`.
-- **Deployment preflight** for Agent Runtime and Gemini Enterprise.
+- The escape for braces that 2.0 documented does not work in ADK 2.15: a text passed as
+  `instruction=` is templated even with doubled braces, and an unknown name stops the
+  agent on its first turn. The instruction is now `static_instruction`, sent as it is.
+- A write is bound to what the user was shown (a fingerprint checked inside the
+  transaction), happens once per confirmation, and is recorded by the store.
+- The confirmation counts the user's messages in the session instead of comparing
+  invocation ids: exactly one message after the preview; any other tool call drops it.
+  It fails closed through `AgentTool` and with planted session state.
+- The guards moved out of the generated `tools.py` into an archetype-owned toolkit,
+  tested once through the real ADK runner with a scripted model.
+- The tool boundary carries text, integers and booleans only; amounts and dates are
+  parsed and formatted by the domain. The tool result is nested under `result`.
+- The conformance gate now catches what passed before: a direct write, an identity
+  argument that is not the session user, a synchronous tool, a templated instruction, a
+  changed archetype file, an evaluation set without the required conversations.
+- The evaluation gate fails without a backend, runs one case at a time, and is replayed
+  without a model on every run.
+- The pipeline example asks for a value the user did not give instead of deciding on a
+  default, maps the user's word to a legacy code, and uses exact decimals.
+- The audit log has an output of its own (Python drops INFO records by default).
+
+**2.0**: redesign for ADK 2.15 and for any legacy source. Version 1 targeted ADK 2.1 and
+legacy Java, kept the rules in the prompt, built a pipeline as a chain of model agents,
+and defaulted to the model alias `gemini-flash-latest`, which no longer resolves.

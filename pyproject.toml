@@ -4,17 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "adk-agent-archetype"
-version = "2.0.0"
+version = "2.1.0"
 description = "Archetype: a legacy business domain modernized as a Google ADK 2.x conversational agent"
 requires-python = ">=3.11"
 dependencies = [
-    # ADK 2.x: App, plugins, graph Workflow, tool confirmation. Tested with 2.15.1.
-    "google-adk>=2.15.0,<3.0.0",
+    # The minor the archetype was verified with: the ADK API moves between minors.
+    # Raise it together with a full run of the gates (static, conformance, unit, evaluation).
+    "google-adk~=2.15.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "google-adk[eval]>=2.15.0,<3.0.0",
+    "google-adk[eval]~=2.15.1",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
@@ -44,15 +45,16 @@ select = ["E", "W", "F", "I", "UP", "N", "S", "T20", "B"]
 # `from . import agent` is the ADK discovery import, not dead code.
 "domain_agent/__init__.py" = ["F401"]
 "examples/*/__init__.py" = ["F401"]
-"tests/**" = ["S101"]
-"tools/**" = ["T20"]
+# Tests may assert (S101); messages and test data may be long (E501); the gates print (T20).
+"tests/**" = ["S101", "E501"]
+"tools/**" = ["T20", "E501"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 warn_unused_ignores = true
 show_error_codes = true
-files = ["domain_agent", "examples", "tools"]
+files = ["domain_agent", "tools"]
 
 [[tool.mypy.overrides]]
 module = "tests.*"

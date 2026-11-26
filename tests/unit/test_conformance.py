@@ -1,4 +1,4 @@
-"""The project passes the conformance gate of the archetype (see archetype.md, Gates)."""
+"""Archetype-owned. The project passes the conformance gate (see archetype.md, Gates)."""
 
 from tools import conformance
 

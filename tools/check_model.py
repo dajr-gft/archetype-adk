@@ -5,42 +5,58 @@
 
 Model availability depends on the project and on the region (a version served on the
 ``global`` endpoint may not be served in a regional one). A model that is not available
-fails at the first user turn with 404 NOT_FOUND, so check before deploying.
+fails at the first user turn with 404 NOT_FOUND, so check before deploying. The backend is
+read from the environment and from ``.env``.
 """
 
 from __future__ import annotations
 
+import ast
 import os
 import sys
+from pathlib import Path
 
-from google import genai
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def answers(client: genai.Client, model: str) -> tuple[bool, str]:
-    try:
-        response = client.models.generate_content(model=model, contents="Reply with: OK")
-    except Exception as error:  # the SDK raises several types; the message is what matters
-        return False, str(error).splitlines()[0][:120]
-    return True, response.model_version or model
+def default_model() -> str:
+    """DEFAULT_MODEL of the agent package, read from its source."""
+    for path in sorted(ROOT.glob("*/agent.py")):
+        if path.parent.name in {"tests", "tools", "examples"}:
+            continue
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "DEFAULT_MODEL":
+                if isinstance(node.value, ast.Constant):
+                    return str(node.value.value)
+    return ""
 
 
 def main() -> int:
-    default = os.environ.get("AGENT_MODEL", "")
-    if not default:
-        from domain_agent.agent import DEFAULT_MODEL
+    try:
+        from dotenv import load_dotenv
 
-        default = DEFAULT_MODEL
-    models = sys.argv[1:] or [default]
-    client = genai.Client()
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "(API key backend)")
+        load_dotenv(ROOT / ".env")
+    except ImportError:
+        pass
+    models = sys.argv[1:] or [os.environ.get("AGENT_MODEL") or default_model()]
+    where = os.environ.get("GOOGLE_CLOUD_LOCATION") or "the Gemini API"
+    try:
+        from google import genai
+
+        client = genai.Client()
+    except Exception as error:  # the SDK raises several types when no backend is configured
+        print(f"No backend is configured (see .env.example): {str(error).splitlines()[0][:160]}")
+        return 2
     failed = 0
     for model in models:
-        ok, detail = answers(client, model)
-        failed += not ok
-        print(f"{'OK  ' if ok else 'FAIL'} {model} @ {location}: {detail}")
+        try:
+            response = client.models.generate_content(model=model, contents="Reply with: OK")
+            print(f"OK   {model} @ {where}: served by {response.model_version or model}")
+        except Exception as error:  # the message is what matters
+            failed += 1
+            print(f"FAIL {model} @ {where}: {str(error).splitlines()[0][:160]}")
     return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.exit(main())

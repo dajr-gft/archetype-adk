@@ -79,7 +79,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "Order 000104 of NORTHWIND TRADING (1,200.00) will be cancelled, reason: wrong address. A second person has to approve. Do you confirm?"
+                "text": "Order 000104 of NORTHWIND TRADING (1200.00) will be cancelled, reason: wrong address. A second person has to approve. Do you confirm?"
               }
             ]
           },
@@ -107,6 +107,103 @@
         }
       ],
       "session_input": { "app_name": "domain_agent", "user_id": "ana", "state": {} }
+    },
+    {
+      "eval_id": "a_second_person_approves",
+      "conversation": [
+        {
+          "invocation_id": "approve-1",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Is anything waiting for my approval?" }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [{ "text": "Requests 2 and 1 are pending and you can decide them." }]
+          },
+          "intermediate_data": {
+            "tool_uses": [{ "name": "list_cancellation_requests", "args": { "status": "PENDING" } }],
+            "intermediate_responses": []
+          }
+        },
+        {
+          "invocation_id": "approve-2",
+          "user_content": { "role": "user", "parts": [{ "text": "Show me request 1." }] },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Request 1: cancel order 000105 of CONTOSO RETAIL (3000.00), reason: customer changed mind, requested by CARLA. Do you approve or reject it?"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [{ "name": "review_cancellation_request", "args": { "request_id": 1 } }],
+            "intermediate_responses": []
+          }
+        },
+        {
+          "invocation_id": "approve-3",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "It is correct. Approve it." }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [{ "text": "Request 1 is approved and order 000105 is cancelled." }]
+          },
+          "intermediate_data": {
+            "tool_uses": [{ "name": "approve_cancellation_request", "args": { "request_id": 1 } }],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": { "app_name": "domain_agent", "user_id": "bruno", "state": {} }
+    },
+    {
+      "eval_id": "a_second_person_rejects_with_a_reason",
+      "conversation": [
+        {
+          "invocation_id": "reject-1",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Show me cancellation request 2." }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Request 2: cancel order 000106 of CONTOSO RETAIL (1800.00), reason: wrong quantity, requested by CARLA. Do you approve or reject it?"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [{ "name": "review_cancellation_request", "args": { "request_id": 2 } }],
+            "intermediate_responses": []
+          }
+        },
+        {
+          "invocation_id": "reject-2",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Reject it. The reason is: already in production" }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [{ "text": "Request 2 is rejected. Order 000106 was not changed." }]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "reject_cancellation_request",
+                "args": { "request_id": 2, "reason": "already in production" }
+              }
+            ],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": { "app_name": "domain_agent", "user_id": "bruno", "state": {} }
     },
     {
       "eval_id": "not_available_here",

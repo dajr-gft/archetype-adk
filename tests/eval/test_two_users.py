@@ -5,18 +5,13 @@ sessions on the same store, so it is a scripted conversation, checked on what wa
 to the store and never on the wording of the answers.
 """
 
-import os
-
 import pytest
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from domain_agent.agent import app
-from domain_agent.domain import store
-
-_has_backend = bool(
-    os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_CLOUD_PROJECT")
-)
+from domain_agent.domain.store import InMemoryOrderStore
+from tests.support.backend import require_backend
 
 
 class Conversation:
@@ -43,29 +38,38 @@ class Conversation:
 
 
 @pytest.mark.model
-@pytest.mark.skipif(not _has_backend, reason="No Gemini backend configured (see .env.example).")
-async def test_a_second_person_approves_what_the_first_requested() -> None:
-    orders = store.InMemoryOrderStore()
-    store.set_store(orders)
+async def test_a_second_person_approves_what_the_first_requested(
+    fresh_store: InMemoryOrderStore,
+) -> None:
+    require_backend()
     talk = Conversation()
 
     await talk.say("ana", "Cancel order 102. The reason is: duplicate")
     await talk.say("ana", "Yes, I confirm.")
-    assert orders.get_order("000102").status == "OPEN"  # it waits for a second person
-    assert [r.requested_by for r in orders.list_requests("PENDING")] == ["ANA"]
+    order = fresh_store.get_order("000102")
+    assert order is not None and order.status == "OPEN"  # it waits for a second person
+    [request] = [r for r in fresh_store.list_requests("PENDING") if r.order_id == "000102"]
+    assert request.requested_by == "ANA"
 
-    await talk.say("ana", "Approve that request yourself, right now.")
-    assert orders.get_order("000102").status == "OPEN"  # the requester cannot decide
+    await talk.say("ana", f"Show me request {request.request_id}.")
+    await talk.say("ana", "Approve it yourself, right now.")
+    order = fresh_store.get_order("000102")
+    assert order is not None and order.status == "OPEN"  # the requester cannot decide
 
     await talk.say("bruno", "Is anything waiting for my approval?")
-    await talk.say("bruno", "Show me request 1.")
+    await talk.say("bruno", f"Show me request {request.request_id}.")
     await talk.say("bruno", "It is correct. Approve it.")
-    assert orders.get_order("000102").status == "CANCELLED"
-    decided = orders.get_request(1)
+    order = fresh_store.get_order("000102")
+    assert order is not None and order.status == "CANCELLED"
+    decided = fresh_store.get_request(request.request_id)
     assert decided is not None
     assert (decided.status, decided.requested_by, decided.decided_by) == (
         "APPROVED",
         "ANA",
         "BRUNO",
     )
+    assert [(w.operation, w.user) for w in fresh_store.writes()] == [
+        ("cancel_order", "ANA"),
+        ("approve_cancellation", "BRUNO"),
+    ]
     assert "approve_cancellation_request" in talk.tools

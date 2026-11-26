@@ -1,62 +1,27 @@
-"""The tools the agent may call: thin adapters between the model and the domain.
+"""The tools the agent may call: one per thing the user can ask for.
 
-A tool decides nothing. It takes what the user said from the model, takes who the user is
-from the session, calls one use case of ``domain.service`` and returns its result in the
-envelope below. The rules live in ``domain``.
+A tool decides nothing and guards nothing. It names the use case that answers it and
+hands it to the toolkit, which supplies the acting user, the envelope of the result and
+the confirmation of writes (see ``toolkit.py``). So a tool:
 
-Envelope (every tool):
-    {"status": "success", "acting_user": ..., <result fields>}
-    {"status": "error", "error_code": ..., "error_message": ..., "rule_id": ...}
+- never reads ``tool_context`` (it only passes it on) and has no parameter for the user;
+- reads with ``toolkit.read``;
+- writes in two tools: ``prepare_<operation>`` (``toolkit.prepare`` with the preview use
+  case) and ``submit_<operation>`` (``toolkit.submit``, no parameter but the context);
+- decides on something another person asked for in two tools as well: a review tool
+  (``toolkit.review``) and the decision tools (``toolkit.decide``).
 
-Guards that the model cannot talk its way around:
-- The acting user is ``tool_context.user_id``. No tool has a parameter for it.
-- A write is submitted from the draft kept in the session, never from arguments of the
-  model, and not in the turn that prepared it: the user answers in between.
-- A request is decided only after its detail was shown in an earlier turn of the session.
-
-Tools are coroutines and run the use case in a worker thread: a use case may wait for the
-system of record, and a synchronous tool would hold the event loop that serves every
-other conversation of the process.
+The docstring is what the model reads: what the tool does, when to call it, each argument.
 """
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Callable
 from typing import Any
 
 from google.adk.tools.tool_context import ToolContext
 
+from . import toolkit
 from .domain import service
-from .domain.rules import DomainError
-
-# Session state written by the tools. Declared here so the conformance gate knows them.
-DRAFT = "cancellation_draft"
-REVIEWED = "reviewed_request"
-
-
-def _error(code: str, message: str, rule_id: str | None = None) -> dict[str, Any]:
-    return {"status": "error", "error_code": code, "error_message": message, "rule_id": rule_id}
-
-
-async def _run(tool_context: ToolContext, use_case: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-    try:
-        result = await asyncio.to_thread(use_case)
-    except DomainError as error:
-        return _error(error.code, error.message, error.rule_id)
-    return {"status": "success", "acting_user": tool_context.user_id.upper(), **result}
-
-
-def _shown_in_an_earlier_turn(
-    kept: dict[str, Any] | None, tool_context: ToolContext
-) -> dict[str, Any] | None:
-    """The refusal when the user has not answered yet to what the session keeps."""
-    if kept and kept["invocation_id"] == tool_context.invocation_id:
-        return _error(
-            "NOT_CONFIRMED",
-            "The user has not answered yet. Show what was prepared and wait for the answer.",
-        )
-    return None
 
 
 async def find_order(query: str, tool_context: ToolContext) -> dict[str, Any]:
@@ -66,18 +31,18 @@ async def find_order(query: str, tool_context: ToolContext) -> dict[str, Any]:
         query: An order id (for example "101") or a part of the customer name.
 
     Returns:
-        The matching orders: order_id, customer, amount_cents, status and
-        has_pending_request.
+        orders (order_id, customer, amount, status, has_pending_request), total_matches,
+        and more: true when there are more orders than the ones listed.
     """
-    return await _run(tool_context, lambda: service.find_orders(query))
+    return await toolkit.read(tool_context, lambda user: service.find_orders(query))
 
 
 async def prepare_order_cancellation(
     order_id: str, reason: str, tool_context: ToolContext
 ) -> dict[str, Any]:
-    """Checks a cancellation and keeps it as a draft. Writes nothing.
+    """Checks a cancellation and keeps it for confirmation. Writes nothing.
 
-    Call it when the user asks to cancel an order, then show the user the order, the
+    Call it when the user asks to cancel an order. Then show the user the order, the
     reason and whether a second person will have to approve, and ask for confirmation.
 
     Args:
@@ -85,43 +50,32 @@ async def prepare_order_cancellation(
         reason: Why the order is cancelled, in the user's words.
 
     Returns:
-        The draft: order_id, customer, amount_cents, status_before, reason and
-        needs_approval.
+        What will be done: order_id, customer, amount, status, reason and needs_approval.
     """
-    tool_context.state[DRAFT] = None
-    result = await _run(tool_context, lambda: service.preview_cancellation(order_id, reason))
-    if result["status"] == "success":
-        tool_context.state[DRAFT] = {
-            "order_id": result["order_id"],
-            "reason": result["reason"],
-            "invocation_id": tool_context.invocation_id,
-        }
-    return result
+    return await toolkit.prepare(
+        tool_context,
+        "cancel_order",
+        lambda user: service.preview_cancellation(order_id, reason),
+    )
 
 
 async def submit_order_cancellation(tool_context: ToolContext) -> dict[str, Any]:
-    """Submits the cancellation that was prepared and that the user confirmed.
+    """Submits the cancellation that was prepared, after the user confirmed it.
 
-    Call it only after the user confirmed the draft shown by prepare_order_cancellation,
-    in a later message of the user.
+    Call it only when the user's last message confirms what prepare_order_cancellation
+    showed. Call no other tool before it in that turn.
 
     Returns:
-        applied true and the cancelled order, or applied false and the request that a
-        second person has to approve.
+        applied true and the cancelled order, or applied false and the request_id of the
+        request that a second person has to approve.
     """
-    draft = tool_context.state.get(DRAFT)
-    if not draft:
-        return _error("NO_DRAFT", "There is no cancellation prepared. Prepare it first.")
-    refused = _shown_in_an_earlier_turn(draft, tool_context)
-    if refused:
-        return refused
-    result = await _run(
+    return await toolkit.submit(
         tool_context,
-        lambda: service.cancel_order(draft["order_id"], draft["reason"], tool_context.user_id),
+        "cancel_order",
+        lambda user, shown, confirmation: service.cancel_order(
+            shown["order_id"], shown["reason"], user, confirmation
+        ),
     )
-    if result["status"] == "success":
-        tool_context.state[DRAFT] = None
-    return result
 
 
 async def list_cancellation_requests(status: str, tool_context: ToolContext) -> dict[str, Any]:
@@ -131,42 +85,31 @@ async def list_cancellation_requests(status: str, tool_context: ToolContext) -> 
         status: PENDING, APPROVED, REJECTED or ALL.
 
     Returns:
-        The requests. you_can_decide is true for a pending request the acting user did
-        not create.
+        requests. you_can_decide is true for a pending request the acting user did not
+        create.
     """
-    return await _run(tool_context, lambda: service.list_requests(status, tool_context.user_id))
+    return await toolkit.read(tool_context, lambda user: service.list_requests(status, user))
 
 
 async def review_cancellation_request(request_id: int, tool_context: ToolContext) -> dict[str, Any]:
     """Shows one cancellation request in full. Required before approving or rejecting it.
 
+    Call it when the user wants to decide a request, then show its detail and ask for
+    the decision.
+
     Args:
         request_id: The number of the request.
 
     Returns:
-        The request: order, reason, who requested it and when, its status and
-        you_can_decide.
+        The request with the order as it is now, who requested it and when, its status
+        and you_can_decide.
     """
-    tool_context.state[REVIEWED] = None
-    result = await _run(tool_context, lambda: service.get_request(request_id, tool_context.user_id))
-    if result["status"] == "success":
-        tool_context.state[REVIEWED] = {
-            "request_id": result["request_id"],
-            "invocation_id": tool_context.invocation_id,
-        }
-    return result
-
-
-def _decidable(request_id: int, tool_context: ToolContext) -> dict[str, Any] | None:
-    """The refusal when the request was not shown to the user in an earlier turn."""
-    reviewed = tool_context.state.get(REVIEWED)
-    if not reviewed or reviewed["request_id"] != request_id:
-        return _error(
-            "NOT_REVIEWED",
-            "Show the request to the user with review_cancellation_request and get the "
-            "decision before deciding it.",
-        )
-    return _shown_in_an_earlier_turn(reviewed, tool_context)
+    return await toolkit.review(
+        tool_context,
+        "cancellation_request",
+        request_id,
+        lambda user: service.review_request(request_id, user),
+    )
 
 
 async def approve_cancellation_request(
@@ -174,8 +117,8 @@ async def approve_cancellation_request(
 ) -> dict[str, Any]:
     """Approves a pending cancellation request: the order is cancelled.
 
-    Call it only after the user saw the request and, in a later message, said to
-    approve it.
+    Call it only when the user's last message says to approve the request that
+    review_cancellation_request showed. Call no other tool before it in that turn.
 
     Args:
         request_id: The number of the request that was reviewed.
@@ -183,14 +126,12 @@ async def approve_cancellation_request(
     Returns:
         The approved request.
     """
-    refused = _decidable(request_id, tool_context)
-    if refused:
-        return refused
-    result = await _run(
-        tool_context, lambda: service.approve_request(request_id, tool_context.user_id)
+    return await toolkit.decide(
+        tool_context,
+        "cancellation_request",
+        request_id,
+        lambda user, confirmation: service.approve_request(request_id, user, confirmation),
     )
-    tool_context.state[REVIEWED] = None
-    return result
 
 
 async def reject_cancellation_request(
@@ -198,8 +139,9 @@ async def reject_cancellation_request(
 ) -> dict[str, Any]:
     """Rejects a pending cancellation request: the order is not changed.
 
-    Call it only after the user saw the request and, in a later message, said to reject
-    it, with the reason.
+    Call it only when the user's last message says to reject the request that
+    review_cancellation_request showed, and gives the reason. Call no other tool before
+    it in that turn.
 
     Args:
         request_id: The number of the request that was reviewed.
@@ -208,12 +150,9 @@ async def reject_cancellation_request(
     Returns:
         The rejected request.
     """
-    refused = _decidable(request_id, tool_context)
-    if refused:
-        return refused
-    result = await _run(
-        tool_context, lambda: service.reject_request(request_id, reason, tool_context.user_id)
+    return await toolkit.decide(
+        tool_context,
+        "cancellation_request",
+        request_id,
+        lambda user, confirmation: service.reject_request(request_id, reason, user, confirmation),
     )
-    if result["status"] == "success":
-        tool_context.state[REVIEWED] = None
-    return result
