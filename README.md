@@ -1,90 +1,114 @@
-# ADK Agent Archetype — Wynxx modernization target (Google ADK 2.1)
+# ADK Agent Archetype
 
-This repository is a **Wynxx code-generation archetype**: the target shape for
-modernizing a **legacy Java domain into a [Google ADK 2.1](https://adk.dev/)
-agent**. Wynxx extracts cohesive **business domains** from the legacy codebase and
-the code generator clones this repo as the reference style for each one.
+Target architecture for modernizing an interactive function of a legacy system into a
+**conversational agent on [Google ADK](https://adk.dev/) 2.x**. A code generator (the
+Legacy Transformer) clones this repository and fills it with one business domain, from
+the business rules it extracted from the legacy source. [`archetype.md`](archetype.md) is
+the contract for the generator; this file is for people.
 
-## The mapping
+It is independent of the legacy technology (mainframe COBOL, FOCUS, CICS, Java, ...) and
+of the business. The domain shipped here (`orders`, invented) only illustrates the shape:
+look something up, change it after a confirmation, and have a second person approve it.
 
-| Legacy (Java)                       | Modernized (ADK 2.1)                                 |
-| ----------------------------------- | --------------------------------------------------- |
-| Service / module (one domain)       | one `LlmAgent` in `domain_agent/agent.py`           |
-| Public service methods / use-cases  | typed function tools in `domain_agent/tools.py`     |
-| Business rules / validations        | the agent `instruction` in `domain_agent/prompt.py` |
+## The idea
 
-## Structure (ADK canonical layout)
+| Decision | What it means in the code |
+|---|---|
+| The model talks, code decides | Rules are plain Python in `domain_agent/domain/`, unit-tested without a model |
+| Who acts comes from the session | The user is `tool_context.user_id`; no tool has a parameter for it |
+| Nothing is written that the user did not see | A write is prepared, shown, then submitted from a draft in the session, in a later turn |
+| Every rule says where it comes from | Legacy code, a document, or a declared assumption in `OPEN_POINTS.md` |
+
+## Layout
 
 ```
-adk-agent-archetype/
-├── .env.example          # backend selection (Vertex AI / AI Studio) + observability
-├── pyproject.toml        # google-adk >= 2.1, build-system, dev tooling (ruff/mypy/pytest)
-├── domain_agent/         # the agent package (its name is the app name)
-│   ├── __init__.py       # `from . import agent` — lets `adk run/web` import it
-│   ├── agent.py          # defines the module-level `root_agent` (required)
-│   ├── prompt.py         # instruction = the domain's business rules
-│   ├── tools.py          # one typed function per domain operation
-│   └── callbacks.py      # cross-cutting guards (audit logging)
-└── tests/                # native ADK eval regression gate
-    ├── orders.test.json  # golden tool-call trajectories
-    ├── test_config.json  # eval criteria (tool_trajectory_avg_score = 1.0)
-    └── test_eval.py      # pytest entrypoint (AgentEvaluator.evaluate)
+archetype.md               the contract for the generator (patterns, rules, gates)
+OPEN_POINTS.md             what the legacy sources do not state
+domain_agent/              the agent package (its name is the ADK app name)
+  agent.py                 root_agent and app (model, generation config, plugins)
+  prompt.py                the instruction: behaviour, no business values
+  tools.py                 thin tools: session identity, draft and review guards
+  plugins.py               audit plugin (one record per tool call)
+  domain/
+    rules.py               constants, validations, the rule catalogue with sources
+    service.py             one use case per legacy operation
+    store.py               records, storage port, in-memory implementation
+examples/pipeline_agent/   the pipeline pattern: a graph workflow with code steps
+tools/
+  conformance.py           gate: the rules of archetype.md a machine can check (C01-C09)
+  check_model.py           preflight: does the configured model answer here?
+  check_deploy.py          preflight: faults that only show after deployment (D01-D06)
+tests/
+  unit/                    rules and tool guards, no model
+  eval/                    golden conversations against the real model
+  archetype/               self-tests of the archetype (gates, pipeline example)
 ```
 
-Run locally from this directory: `adk web` (dev UI) or `adk run domain_agent`.
-
-## Conventions
-
-- **Model:** Gemini on Vertex AI (global endpoint). Default to the `gemini-flash-latest`
-  selector. For **auditable/compliance domains, pin a specific GA version** (reproducibility
-  beats auto-currency) and **never default to a `-preview` model** (quota/availability risk).
-  For reasoning-heavy domains, add a `planner` (thinking budget) before escalating to a
-  `gemini-pro-*` GA tier — see `archetype.md`.
-- **Determinism:** every agent sets `generate_content_config` with `temperature=0` (plus
-  `HttpRetryOptions` for 429 resilience). Pipeline sub-agents add `include_contents='none'`
-  so each step is a pure function of the state threaded via `output_key`.
-- **One agent per domain, one tool per operation;** business rules live in the
-  instruction, not scattered across tools.
-- **Tools** return a `dict` with a `status` key, validate inputs and coerce numeric
-  strings *inside the tool*, and never raise — ADK builds the tool schema from the
-  signature and docstring.
-- **Composing domains:** for a domain that orchestrates sub-capabilities, use a
-  `SequentialAgent` (ordered, auditable pipeline), `ParallelAgent`, or `LoopAgent`; a
-  coordinator `LlmAgent` with `sub_agents=[...]` carries shared guardrails via
-  `global_instruction`.
-- The illustrative domain here is `orders` — generated agents replace it with the
-  domain being modernized (e.g. `credit`, `shopping`, `delivery`).
-
-## Evaluation (the regression gate)
-
-The native ADK evaluator turns golden trajectories into a build gate — essential for
-auditable domains where a silently-downgraded `DENY` must be caught:
+## Run it
 
 ```bash
+python -m venv .venv && . .venv/bin/activate        # Python 3.11 or later
 pip install -e ".[dev]"
-pytest tests/                              # via AgentEvaluator (needs a Gemini backend)
-# equivalent CLI form — pass the config explicitly (CLI does not auto-discover it):
-adk eval domain_agent tests/orders.test.json --config_file_path tests/test_config.json
+cp .env.example .env                                 # project, location, optional model
+
+python tools/check_model.py                          # the model answers in this project and region
+adk run domain_agent                                 # talk to the agent in the terminal
+adk web                                              # or in the ADK developer UI
+adk run examples/pipeline_agent                      # the pipeline example
 ```
 
-`test_config.json` sets `tool_trajectory_avg_score = 1.0`, so any wrong, reordered, or
-dropped tool call fails — the auditability lever. (`response_match_score` is omitted on
-purpose: ROUGE on free-form prose is noisy and drifts under the `-latest` alias; add it
-only with a pinned GA model and stable references.) Generated agents replace
-`orders.test.json` with domain-specific golden trajectories (e.g.
-`validate → risk → pricing → decision`), whose tools take explicit scalar args that
-assert cleanly.
+In the developer UI the user id of the session is the acting user: use two user ids to
+play the requester and the approver.
 
-## Quality tooling
+## Gates
 
 ```bash
-ruff check domain_agent/      # flags print(), security smells, style, imports
-mypy domain_agent/            # strict typing (the archetype mandates it)
+ruff check . && ruff format --check . && mypy        # static
+python tools/conformance.py                          # conformance, C01-C09
+pytest -m "not model"                                # unit tests and self-tests, no model
+pytest -m model                                      # evaluation, calls the model
 ```
 
-## Observability
+The first three need no credentials and run in seconds. The evaluation asks for an exact
+tool trajectory: a wrong, missing, extra or reordered tool call fails.
 
-ADK emits OpenTelemetry traces/logs/metrics; for an auditable decision the trace **is**
-the provenance. Enable Cloud Trace on deploy (Agent Runtime / Cloud Run / GKE) and use
-`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT` to keep PII out of logs.
-See `.env.example`.
+## Deploy
+
+```bash
+agents-cli scaffold enhance . --agent-directory domain_agent --deployment-target agent_runtime
+python tools/check_deploy.py                         # fix what it reports
+agents-cli deploy
+```
+
+`check_deploy.py` checks six faults that pass every local test and fail on the first call
+of the deployed agent (for example a missing server dependency, or the missing routes
+that Gemini Enterprise calls). Before deploying, replace the in-memory store with an
+implementation on the system of record, and decide who may do what from the user id the
+platform passes. See section 10 of `archetype.md`.
+
+## What changed in 2.0
+
+Version 1 targeted ADK 2.1 and legacy Java. Version 2 is a redesign:
+
+- **ADK 2.15** (Python 3.11+): `App` with plugins, the graph `Workflow`, session identity
+  on the tool context. The `global_instruction` field is deprecated in ADK and no longer
+  used.
+- **Rules moved out of the instruction** into a domain package with no ADK dependency,
+  with a rule catalogue that cites its sources. Version 1 put the rules in the prompt and
+  repeated their values in the tools.
+- **The pipeline pattern is a graph workflow with code steps**, not a chain of model
+  agents that each call one tool: two model calls instead of one per step, and the order
+  cannot be skipped or changed by a model.
+- **Write and approval guards in code**: draft before submit, never in the same turn;
+  review before a decision; identity from the session. Tools are coroutines, so a slow
+  system of record does not stall the other conversations.
+- **A conformance gate** turns the prose rules into checks. Each one is a defect that
+  code generation produced before (a tool imported but not defined, unescaped braces in
+  an instruction, an unavailable model name, the old evaluation format, ...).
+- **The model is configuration.** The previous default, the alias `gemini-flash-latest`,
+  no longer resolves. The default is now a dated version, overridable with `AGENT_MODEL`,
+  and `tools/check_model.py` verifies it per project and region.
+- **Any legacy source.** The mapping covers mainframe screens and programs as well as
+  services.
+- **Money is exact** (integer minor units or `Decimal`), never `float`.
+- **Deployment preflight** for Agent Runtime and Gemini Enterprise.

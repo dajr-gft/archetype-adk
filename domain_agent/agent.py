@@ -1,39 +1,41 @@
-"""ADK 2.1 archetype: a legacy business domain modeled as a Google ADK agent.
+"""The agent of the domain and the app that hosts it (Google ADK 2.x).
 
-Each cohesive domain that Wynxx extracts from the legacy monolith becomes one
-``LlmAgent``. The domain's operations are exposed as function tools and its
-business rules live in the agent instruction. The module-level ``root_agent`` is
-the entry point the ADK CLI (``adk run`` / ``adk web``) discovers.
+``root_agent`` is what ``adk run`` / ``adk web`` discover; ``app`` is what a runner and a
+deployment use (plugins, resumability, context settings). ``App.name`` is the name of
+this package: ADK resolves sessions by it.
 
-Generated agents replace the illustrative ``orders`` domain with the domain being
-modernized. See ``archetype.md`` for the full pattern catalogue (pipeline vs
-dispatcher, generation config, planners, structured output, evaluation).
+See ``archetype.md`` for the patterns (conversational agent, graph workflow for a fixed
+pipeline) and for what a generated agent may and may not change in this file.
 """
 
-from google.adk.agents import LlmAgent
+from __future__ import annotations
+
+import os
+
+from google.adk.agents import Agent
+from google.adk.apps import App
 from google.genai import types
 
-from .callbacks import audit_tool_call
+from .plugins import AuditPlugin
 from .prompt import DOMAIN_INSTRUCTION
-from .tools import execute_operation, list_capabilities
+from .tools import (
+    approve_cancellation_request,
+    find_order,
+    list_cancellation_requests,
+    prepare_order_cancellation,
+    reject_cancellation_request,
+    review_cancellation_request,
+    submit_order_cancellation,
+)
 
-# ── Model ─────────────────────────────────────────────────────────────────────
-# Gemini on Vertex AI (global endpoint). Default to the latest stable Flash tier
-# via the `-latest` selector (requires the `global` endpoint set in .env).
-#
-# For auditable/compliance domains, PIN a specific GA version instead of `-latest`
-# (e.g. a pinned `gemini-*-flash` GA release) so decisions are reproducible and do
-# not silently drift when Google rotates the alias. Reserve a `gemini-pro-*` GA
-# tier for genuinely reasoning-heavy domains — and prefer adding a `planner`
-# (see archetype.md) before escalating the model tier. Never default to a
-# `-preview` model: preview models carry availability/quota limitations.
-MODEL = "gemini-flash-latest"
+# The model is configuration, not code: which Gemini versions a project can call depends
+# on the project and on the region. AGENT_MODEL overrides the default; `python
+# tools/check_model.py` verifies that the chosen model answers before anything is deployed.
+DEFAULT_MODEL = "gemini-3.8-flash"
+MODEL = os.environ.get("AGENT_MODEL", DEFAULT_MODEL)
 
-# ── Generation config ─────────────────────────────────────────────────────────
-# Business-rule agents must not re-roll their evaluation: pin temperature to 0 for
-# the most deterministic decoding the model allows. `temperature=0` is strong but
-# not a byte-for-byte determinism guarantee — the eval gate (tests/) is what
-# actually locks behaviour. `HttpRetryOptions` adds resilience to transient 429s.
+# temperature 0: the agent must not re-roll what it does with the same request. It is not
+# a guarantee of identical text; the evaluation gate is what holds behaviour.
 GENERATION = types.GenerateContentConfig(
     temperature=0.0,
     http_options=types.HttpOptions(
@@ -41,15 +43,21 @@ GENERATION = types.GenerateContentConfig(
     ),
 )
 
-root_agent = LlmAgent(
-    name="orders_domain_agent",
+root_agent = Agent(
+    name="orders_agent",
     model=MODEL,
-    description=(
-        "Modernized 'Orders' business domain (migrated from a legacy Java service). "
-        "A coordinator agent routes Orders-related requests here."
-    ),
+    description="Looks up orders and cancels them, with approval by a second person.",
     instruction=DOMAIN_INSTRUCTION,
-    tools=[list_capabilities, execute_operation],
+    tools=[
+        find_order,
+        prepare_order_cancellation,
+        submit_order_cancellation,
+        list_cancellation_requests,
+        review_cancellation_request,
+        approve_cancellation_request,
+        reject_cancellation_request,
+    ],
     generate_content_config=GENERATION,
-    after_tool_callback=audit_tool_call,
 )
+
+app = App(name="domain_agent", root_agent=root_agent, plugins=[AuditPlugin()])

@@ -4,15 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "adk-agent-archetype"
-version = "0.1.0"
-description = "Wynxx modernization archetype: a legacy domain modeled as a Google ADK 2.1 agent"
-requires-python = ">=3.10"
+version = "2.0.0"
+description = "Archetype: a legacy business domain modernized as a Google ADK 2.x conversational agent"
+requires-python = ">=3.11"
 dependencies = [
-    "google-adk>=2.1.0",
+    # ADK 2.x: App, plugins, graph Workflow, tool confirmation. Tested with 2.15.1.
+    "google-adk>=2.15.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "google-adk[eval]>=2.15.0,<3.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
@@ -24,29 +26,33 @@ packages = ["domain_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+markers = ["model: calls a Gemini model (needs a configured backend)"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-# Operationalize the archetype's own anti-patterns:
-#   T20 -> flags `print()` (forbidden in tools); S -> bandit (e.g. flags `os.system`,
-#   insecure calls); the rest cover style, imports, naming, and modern-Python upgrades.
-select = ["E", "W", "F", "I", "UP", "N", "S", "T20"]
+# T20 flags print() (forbidden in an agent); S is bandit; the rest: style, imports,
+# naming, modern Python.
+select = ["E", "W", "F", "I", "UP", "N", "S", "T20", "B"]
 
 [tool.ruff.lint.per-file-ignores]
-# `from . import agent` is the required ADK discovery import (side-effect), not dead code.
+# `from . import agent` is the ADK discovery import, not dead code.
 "domain_agent/__init__.py" = ["F401"]
-# Tests may use assert (S101).
+"examples/*/__init__.py" = ["F401"]
 "tests/**" = ["S101"]
+"tools/**" = ["T20"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_unused_ignores = true
 show_error_codes = true
+files = ["domain_agent", "examples", "tools"]
 
 [[tool.mypy.overrides]]
 module = "tests.*"
