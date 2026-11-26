@@ -1,0 +1,130 @@
+{
+  "eval_set_id": "orders_agent_golden",
+  "name": "orders agent - golden tool trajectories",
+  "description": "Regression gate of the illustrative orders domain. With tool_trajectory_avg_score = 1.0 (test_config.json) a wrong, missing, extra or reordered tool call fails. A generated agent replaces these cases with the conversations of its own domain.",
+  "eval_cases": [
+    {
+      "eval_id": "lookup_by_id",
+      "conversation": [
+        {
+          "invocation_id": "lookup-1",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "What is the status of order 103?" }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [{ "text": "Order 000103 of NORTHWIND TRADING is SHIPPED." }]
+          },
+          "intermediate_data": {
+            "tool_uses": [{ "name": "find_order", "args": { "query": "103" } }],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": { "app_name": "domain_agent", "user_id": "ana", "state": {} }
+    },
+    {
+      "eval_id": "cancel_after_confirmation",
+      "conversation": [
+        {
+          "invocation_id": "cancel-1",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Cancel order 101. The reason is: duplicate" }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Order 000101 of ACME SUPPLIES (450.00) will be cancelled, reason: duplicate. No approval is needed. Do you confirm?"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "prepare_order_cancellation",
+                "args": { "order_id": "101", "reason": "duplicate" }
+              }
+            ],
+            "intermediate_responses": []
+          }
+        },
+        {
+          "invocation_id": "cancel-2",
+          "user_content": { "role": "user", "parts": [{ "text": "Yes, I confirm." }] },
+          "final_response": {
+            "role": "model",
+            "parts": [{ "text": "Order 000101 is cancelled." }]
+          },
+          "intermediate_data": {
+            "tool_uses": [{ "name": "submit_order_cancellation", "args": {} }],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": { "app_name": "domain_agent", "user_id": "ana", "state": {} }
+    },
+    {
+      "eval_id": "nothing_is_written_when_the_user_declines",
+      "conversation": [
+        {
+          "invocation_id": "decline-1",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Cancel order 104. The reason is: wrong address" }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Order 000104 of NORTHWIND TRADING (1,200.00) will be cancelled, reason: wrong address. A second person has to approve. Do you confirm?"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "prepare_order_cancellation",
+                "args": { "order_id": "104", "reason": "wrong address" }
+              }
+            ],
+            "intermediate_responses": []
+          }
+        },
+        {
+          "invocation_id": "decline-2",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "No, leave it as it is." }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [{ "text": "Nothing was changed." }]
+          },
+          "intermediate_data": { "tool_uses": [], "intermediate_responses": [] }
+        }
+      ],
+      "session_input": { "app_name": "domain_agent", "user_id": "ana", "state": {} }
+    },
+    {
+      "eval_id": "not_available_here",
+      "conversation": [
+        {
+          "invocation_id": "scope-1",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Create a new order of 300.00 for ACME Supplies." }]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [{ "text": "Creating orders is not available here." }]
+          },
+          "intermediate_data": { "tool_uses": [], "intermediate_responses": [] }
+        }
+      ],
+      "session_input": { "app_name": "domain_agent", "user_id": "ana", "state": {} }
+    }
+  ]
+}
