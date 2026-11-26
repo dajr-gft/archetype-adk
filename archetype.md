@@ -49,7 +49,6 @@ Everything below follows from four decisions. When a case is not covered, decide
 | `domain_agent/prompt.py` | generator | The instruction: behaviour, no business values |
 | `domain_agent/agent.py` | generator | `root_agent` and `app`: name, description and tool list change |
 | `domain_agent/wiring.py` | generator | Which store the agent is connected to |
-| `tests/conftest.py` | generator | The fresh store of each test: adapt the store class |
 | `tests/unit/test_rules.py` | generator | At least one test per rule |
 | `tests/unit/test_flows.py` | generator | The flows of the domain through the real tools, without a model |
 | `tests/eval/<domain>.test.json` | generator | Golden conversations (replaces `orders.test.json`) |
@@ -59,7 +58,7 @@ Everything below follows from four decisions. When a case is not covered, decide
 | `domain_agent/toolkit.py` | archetype | Envelope, acting user, confirmation of writes |
 | `domain_agent/plugins.py` | archetype | Audit plugin |
 | `domain_agent/__init__.py` | archetype | `from . import agent` |
-| `tools/`, `conftest.py`, `tests/support/` | archetype | Gates and test support |
+| `tools/`, `conftest.py`, `tests/conftest.py`, `tests/support/` | archetype | Gates and test support |
 | `tests/unit/test_toolkit.py`, `test_base.py`, `test_replay.py`, `test_conformance.py` | archetype | Tests that hold for any domain |
 | `tests/eval/test_eval.py`, `tests/eval/test_config.json` | archetype | Evaluation gate |
 | `pyproject.toml`, `.env.example`, `.gitignore` | archetype | Add a dependency only when an adapter needs it; set `[project].name` |
@@ -248,6 +247,8 @@ def set_store(store: OrderStore) -> None: ...
   store uses one lock. `tests/unit/test_base.py` checks it on any implementation.
 - The in-memory implementation serves local runs, unit tests and the evaluation, with
   **invented** seed data. Never put real data of the legacy system in the repository.
+  `in_memory_store()` returns a new one: keep that function and its name (C00). The
+  tests of the archetype start each test from it, so no test file names your classes.
 - `wiring.py` connects the store. A deployed agent connects an adapter of the system of
   record there (`domain_agent/adapters/`, which may use any client library).
 
@@ -791,7 +792,8 @@ What to decide before deploying:
 2. Choose the pattern (section 4).
 3. Write `domain/rules.py`: constants, `RULES`, normalizers, formatters.
 4. Write `domain/store.py` (records, port, in-memory store with invented data) and adapt
-   `wiring.py` and `tests/conftest.py` to the store class.
+   `wiring.py`. Keep the function `in_memory_store()` in `store.py`: the tests take
+   their fresh store from it.
 5. Write `domain/service.py`: the read use cases; for each write, the private function,
    its preview and the write.
 6. Write `tests/unit/test_rules.py` and run it (`pytest tests/unit/test_rules.py

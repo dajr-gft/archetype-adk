@@ -389,3 +389,25 @@ def test_c12_line_ends_do_not_count(copy: Path) -> None:
 
 def test_the_pipeline_example_passes_its_profile() -> None:
     assert conformance.check(conformance.ROOT, "examples/pipeline_agent", "tests/archetype") == []
+
+
+# ── C00 and the name of the package ───────────────────────────────────────────────────
+
+
+def test_c00_the_store_keeps_the_factory_the_tests_start_from(copy: Path) -> None:
+    edit(copy, STORE, "def in_memory_store(", "def new_store(")
+    assert "does not define in_memory_store()" in findings(copy)
+
+
+def test_the_package_may_be_renamed_after_the_domain(copy: Path) -> None:
+    """Several agents in one environment need distinct names; the gates follow the rename."""
+    (copy / "domain_agent").rename(copy / "orders_agent")
+    for path in copy.rglob("*"):
+        if path.is_file() and path.suffix in {".py", ".json", ".md", ".sha256"}:
+            text = path.read_text(encoding="utf-8")
+            if "domain_agent" in text and path.name != "test_gate.py":
+                path.write_text(
+                    text.replace("domain_agent", "orders_agent"), encoding="utf-8", newline="\n"
+                )
+    assert conformance.Project(copy).package.name == "orders_agent"
+    assert conformance.check(copy) == []

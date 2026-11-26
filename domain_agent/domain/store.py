@@ -158,7 +158,12 @@ class InMemoryOrderStore:
         return list(self._writes.values())
 
 
-_store: OrderStore = InMemoryOrderStore()
+def in_memory_store() -> InMemoryOrderStore:
+    """A new in-memory store with the seed data: local runs, tests, the evaluation."""
+    return InMemoryOrderStore()
+
+
+_store: OrderStore = in_memory_store()
 
 
 def get_store() -> OrderStore:

@@ -32,6 +32,7 @@ OWNED = (
     "tools/check_deploy.py",
     "tools/check_model.py",
     "conftest.py",
+    "tests/conftest.py",
     "tests/support/scripted.py",
     "tests/support/backend.py",
     "tests/unit/test_toolkit.py",
@@ -728,8 +729,10 @@ def check_tools_delegate(
 # ── C12: what belongs to the archetype ────────────────────────────────────────────────
 
 
-def _digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+def _digest(path: Path, package: str = "domain_agent") -> str:
+    """The digest of a file, whatever its line ends and the name the package was given."""
+    content = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(content.replace(package.encode(), b"domain_agent")).hexdigest()
 
 
 def owned_files(project: Project) -> list[str]:
@@ -737,7 +740,10 @@ def owned_files(project: Project) -> list[str]:
 
 
 def write_owned_manifest(project: Project) -> None:
-    lines = [f"{_digest(project.root / name)}  {name}" for name in owned_files(project)]
+    lines = [
+        f"{_digest(project.root / name, project.package.name)}  {name}"
+        for name in owned_files(project)
+    ]
     (project.root / OWNED_MANIFEST).write_text(
         "\n".join(lines) + "\n", encoding="utf-8", newline="\n"
     )
@@ -762,7 +768,7 @@ def check_owned_files(project: Project) -> None:
             project.add("C12", f"{name} belongs to the archetype and is missing")
         elif wanted is None:
             project.add("C12", f"{name} is not in {OWNED_MANIFEST}")
-        elif _digest(path) != wanted:
+        elif _digest(path, project.package.name) != wanted:
             project.add("C12", f"{name} belongs to the archetype and was changed")
 
 
@@ -806,6 +812,13 @@ def check(root: Path = ROOT, package: str | None = None, tests: str = "tests/uni
     if conversational:
         tools = project.tree("tools.py")
         service = project.tree("domain/service.py")
+        store = project.package / "domain" / "store.py"
+        if store.is_file() and "def in_memory_store(" not in store.read_text(encoding="utf-8"):
+            project.add(
+                "C00",
+                "domain/store.py does not define in_memory_store(): wiring.py and the tests "
+                "take their store from it",
+            )
         if tools is not None and agent is not None:
             names = check_tools_contract(project, tools, agent)
             check_tool_signatures(project, tools)

@@ -16,8 +16,8 @@ connects an in-memory store.
 
 from __future__ import annotations
 
-from .domain.store import InMemoryOrderStore, set_store
+from .domain.store import in_memory_store, set_store
 
 
 def configure() -> None:
-    set_store(InMemoryOrderStore())
+    set_store(in_memory_store())

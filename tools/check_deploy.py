@@ -105,10 +105,7 @@ def _check_wiring(package: Path, findings: list[str]) -> None:
                 connected.append(ast.unparse(node.args[0]))
     if not connected:
         findings.append("D06 wiring.py has no configure() that calls set_store(...)")
-    elif any(
-        re.match(r"InMemory", store.split(".")[-1].lstrip("(")) or "InMemory" in store
-        for store in connected
-    ):
+    elif any(re.search(r"in_?memory", store, re.IGNORECASE) for store in connected):
         findings.append(
             f"D06 wiring.py connects {connected[0]}: a deployed agent keeps its data in the "
             "system of record, not in the memory of one container"
