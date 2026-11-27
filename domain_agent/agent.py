@@ -1,8 +1,7 @@
 """The agent of the domain and the app that hosts it (Google ADK 2.x).
 
 ``root_agent`` is what ``adk run`` / ``adk web`` discover; ``app`` is what a runner and a
-deployment use (plugins, resumability, context settings). ``App.name`` is the name of
-this package: ADK resolves sessions by it.
+deployment use. ``App.name`` is the name of this package: ADK resolves sessions by it.
 
 See ``archetype.md`` for the patterns (conversational agent, graph workflow for a fixed
 pipeline) and for what a generated agent may and may not change in this file.
@@ -16,6 +15,7 @@ from google.adk.agents import Agent
 from google.adk.apps import App
 from google.genai import types
 
+from . import wiring
 from .plugins import AuditPlugin
 from .prompt import DOMAIN_INSTRUCTION
 from .tools import (
@@ -28,16 +28,21 @@ from .tools import (
     submit_order_cancellation,
 )
 
+wiring.configure()
+
 # The model is configuration, not code: which Gemini versions a project can call depends
 # on the project and on the region. AGENT_MODEL overrides the default; `python
 # tools/check_model.py` verifies that the chosen model answers before anything is deployed.
 DEFAULT_MODEL = "gemini-3.8-flash"
 MODEL = os.environ.get("AGENT_MODEL", DEFAULT_MODEL)
 
-# temperature 0: the agent must not re-roll what it does with the same request. It is not
-# a guarantee of identical text; the evaluation gate is what holds behaviour.
+# 0 by default: the agent should not re-roll what it does with the same request. It is not
+# a guarantee of identical text, and a model family may document another value: follow its
+# model card (AGENT_TEMPERATURE) and let the evaluation gate decide.
+TEMPERATURE = float(os.environ.get("AGENT_TEMPERATURE", "0.0"))
+
 GENERATION = types.GenerateContentConfig(
-    temperature=0.0,
+    temperature=TEMPERATURE,
     http_options=types.HttpOptions(
         retry_options=types.HttpRetryOptions(initial_delay=1, attempts=3),
     ),
@@ -47,7 +52,7 @@ root_agent = Agent(
     name="orders_agent",
     model=MODEL,
     description="Looks up orders and cancels them, with approval by a second person.",
-    instruction=DOMAIN_INSTRUCTION,
+    static_instruction=DOMAIN_INSTRUCTION,
     tools=[
         find_order,
         prepare_order_cancellation,
